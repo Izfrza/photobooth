@@ -1,0 +1,447 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Video Recorder Pro (With Filters)</title>
+    <script src="https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js"></script>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        body {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            background: url('https://source.unsplash.com/random/1920x1080') no-repeat center center/cover;
+            color: rgb(16, 16, 16);
+            padding: 20px 0;
+        }
+
+        .container {
+            background: rgba(255, 255, 255, 0.25);
+            padding: 20px;
+            border-radius: 15px;
+            box-shadow: 0 0 20px rgba(0, 0, 0, 0.6);
+            width: 90%;
+            max-width: 700px;
+        }
+
+        .container h1 {
+            color: #242424;
+            text-shadow: 1px 1px 2px rgba(0,0,0,0.5);
+        }
+
+        video#video, video#recordedVideoPreview {
+            width: 100%;
+            max-width: 480px;
+            height: auto;
+            border-radius: 10px;
+            box-shadow: 0 0 15px rgba(0, 0, 0, 0.5);
+            display: block;
+            margin: 0 auto 15px auto;
+            background-color: #000;
+        }
+        /* Canvas untuk filter bisa disembunyikan */
+        canvas#filterCanvas {
+            display: none;
+        }
+
+        .recording-timer {
+            position: absolute;
+            top: 10px;
+            left: 50%;
+            transform: translateX(-50%);
+            font-size: 28px;
+            font-weight: bold;
+            color: #FFF;
+            background-color: rgba(255, 0, 0, 0.7);
+            padding: 5px 15px;
+            border-radius: 10px;
+            z-index: 10;
+            display: none;
+        }
+        
+        #qrcodeContainer {
+            background-color: rgba(255, 255, 255, 0.9);
+            padding: 15px;
+            border-radius: 10px;
+            margin-top: 20px;
+            color: #333;
+            text-align: center;
+        }
+        #qrcodeCanvas {
+            margin: 10px auto;
+            display: flex;
+            justify-content: center;
+        }
+        #qrcodeCanvas img {
+            margin: auto;
+        }
+        .video-controls {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 10px;
+        }
+        .video-controls .btn-group {
+            display: flex;
+            gap: 10px;
+        }
+        #recordedVideoPreviewContainer {
+            margin-top: 15px;
+            text-align: center;
+        }
+         #recordedVideoPreviewContainer p {
+            color: #181818;
+            font-weight: bold;
+         }
+
+    </style>
+</head>
+
+<body>
+    <div class="container text-center">
+        <h1>Video Recorder Web (With Filters)</h1>
+        <div class="row">
+            <div class="col-md-12 position-relative mb-3">
+                <div class="recording-timer" id="recordingTimer">00:00</div>
+                <video id="video" autoplay playsinline muted></video>
+                <canvas id="filterCanvas"></canvas> <div id="recordedVideoPreviewContainer" style="display: none;">
+                    <p>Preview Rekaman (Dengan Filter):</p>
+                    <video id="recordedVideoPreview" controls></video>
+                </div>
+
+                <div class="video-controls mt-2">
+                    <div class="btn-group">
+                        <button class="btn btn-danger" id="recordBtn" disabled>🎥 Mulai Rekam</button>
+                        <button class="btn btn-warning d-none" id="stopBtn">🛑 Stop Rekam</button>
+                    </div>
+                    <div class="btn-group mt-2">
+                        <button class="btn btn-secondary d-none" id="resetBtn">🔄 Rekam Ulang</button>
+                        <button class="btn btn-success d-none" id="downloadBtn">⬇️ Download Video & QR</button>
+                    </div>
+                </div>
+                <div class="mt-3">
+                    <label for="filter" class="form-label" style="color: #121212;">Filter (Live & Rekaman):</label>
+                    <select id="filter" class="form-select w-75 mx-auto">
+                        <option value="none">Tanpa Filter</option>
+                        <option value="grayscale(100%)">Grayscale</option>
+                        <option value="sepia(100%)">Sepia</option>
+                        <option value="invert(100%)">Invert</option>
+                        <option value="blur(3px)">Blur</option>
+                        <option value="contrast(200%)">Kontras Tinggi</option>
+                        <option value="brightness(150%)">Lebih Cerah</option>
+                        <option value="saturate(200%)">Saturasi Tinggi</option>
+                        <option value="hue-rotate(90deg)">Warna Unik</option>
+                    </select>
+                </div>
+            </div>
+            <div class="col-md-12 d-flex flex-column align-items-center">
+                 <div id="qrcodeContainer" class="mt-3" style="display: none;">
+                    <p>Pindai QR Code ini untuk mengunduh video ke HP:</p>
+                    <div id="qrcodeCanvas"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const video = document.getElementById('video');
+        const filterCanvas = document.getElementById('filterCanvas');
+        const canvasCtx = filterCanvas.getContext('2d', { willReadFrequently: true }); // willReadFrequently untuk performa
+
+        const recordBtn = document.getElementById('recordBtn');
+        const stopBtn = document.getElementById('stopBtn');
+        const downloadBtn = document.getElementById('downloadBtn');
+        const resetBtn = document.getElementById('resetBtn');
+        const filterSelect = document.getElementById('filter');
+        const recordingTimerDisplay = document.getElementById('recordingTimer');
+        const qrcodeContainer = document.getElementById('qrcodeContainer');
+        const qrcodeCanvasDiv = document.getElementById('qrcodeCanvas');
+        const recordedVideoPreview = document.getElementById('recordedVideoPreview');
+        const recordedVideoPreviewContainer = document.getElementById('recordedVideoPreviewContainer');
+
+        let mediaRecorder;
+        let recordedBlobs;
+        let webcamStream; // Stream asli dari webcam
+        let canvasStream; // Stream dari canvas (video terfilter + audio asli)
+        let recordingInterval;
+        let recordedVideoURL = null;
+        let animationFrameId;
+        const TARGET_FPS = 25; // Target FPS untuk canvas stream
+
+        async function initWebcam() {
+            if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+                try {
+                    webcamStream = await navigator.mediaDevices.getUserMedia({ 
+                        video: { facingMode: "user" }, // Coba minta kamera depan
+                        audio: true 
+                    });
+                    video.srcObject = webcamStream;
+                    video.play();
+
+                    video.onloadedmetadata = () => {
+                        // Sesuaikan ukuran canvas dengan video
+                        filterCanvas.width = video.videoWidth;
+                        filterCanvas.height = video.videoHeight;
+                        drawVideoToCanvas(); // Mulai menggambar ke canvas
+                        recordBtn.disabled = false; // Aktifkan tombol rekam setelah siap
+                    };
+
+                } catch (err) {
+                    console.error("Error accessing webcam: ", err);
+                    alert("Tidak bisa mengakses webcam. Pastikan Anda memberikan izin dan tidak ada aplikasi lain yang menggunakan kamera/mikrofon.");
+                    recordBtn.disabled = true;
+                }
+            } else {
+                alert("getUserMedia tidak didukung di browser ini.");
+                recordBtn.disabled = true;
+            }
+        }
+        
+        function drawVideoToCanvas() {
+            if (video.paused || video.ended || !webcamStream || !webcamStream.active) {
+                if (animationFrameId) cancelAnimationFrame(animationFrameId);
+                return;
+            }
+            // Terapkan filter ke canvas
+            canvasCtx.filter = filterSelect.value;
+            canvasCtx.drawImage(video, 0, 0, filterCanvas.width, filterCanvas.height);
+            animationFrameId = requestAnimationFrame(drawVideoToCanvas);
+        }
+
+        initWebcam();
+
+        filterSelect.addEventListener('change', () => {
+            // Filter untuk preview langsung di elemen <video>
+            video.style.filter = filterSelect.value;
+            // Filter untuk canvas (yang direkam) sudah dihandle di drawVideoToCanvas
+        });
+        // Inisialisasi filter untuk preview video
+        video.style.filter = filterSelect.value;
+
+
+        recordBtn.addEventListener('click', () => {
+            startRecording();
+        });
+
+        stopBtn.addEventListener('click', () => {
+            stopRecording();
+        });
+
+        resetBtn.addEventListener('click', () => {
+            resetRecording();
+        });
+
+        downloadBtn.addEventListener('click', () => {
+            downloadAndQr();
+        });
+
+        function startRecording() {
+            if (!webcamStream || !webcamStream.active) {
+                alert("Webcam stream tidak aktif. Coba refresh halaman atau cek izin kamera.");
+                return;
+            }
+            if (!filterCanvas.captureStream) {
+                 alert("Browser Anda tidak mendukung canvas.captureStream(). Coba browser modern seperti Chrome atau Firefox.");
+                return;
+            }
+
+            // Dapatkan video track dari canvas (sudah terfilter)
+            const canvasVideoTrack = filterCanvas.captureStream(TARGET_FPS).getVideoTracks()[0];
+            
+            // Dapatkan audio track dari webcamStream asli
+            const audioTracks = webcamStream.getAudioTracks();
+            
+            // Gabungkan video track dari canvas dengan audio track dari webcam
+            if (audioTracks.length > 0) {
+                canvasStream = new MediaStream([canvasVideoTrack, audioTracks[0]]);
+            } else {
+                canvasStream = new MediaStream([canvasVideoTrack]); // Hanya video jika tidak ada audio
+                console.warn("Tidak ada audio track terdeteksi. Merekam video tanpa suara.");
+            }
+
+            recordedBlobs = [];
+            let options = { mimeType: 'video/webm;codecs=vp9,opus' };
+            if (!MediaRecorder.isTypeSupported(options.mimeType)) {
+                options = { mimeType: 'video/webm;codecs=vp8,opus' };
+                if (!MediaRecorder.isTypeSupported(options.mimeType)) {
+                    options = { mimeType: 'video/webm' };
+                     if (!MediaRecorder.isTypeSupported(options.mimeType)) {
+                        options = { mimeType: '' };
+                    }
+                }
+            }
+
+            try {
+                mediaRecorder = new MediaRecorder(canvasStream, options); // Rekam dari canvasStream
+            } catch (e) {
+                console.error('Exception while creating MediaRecorder:', e);
+                alert('Gagal memulai MediaRecorder: ' + e.message);
+                return;
+            }
+
+            recordBtn.classList.add('d-none');
+            stopBtn.classList.remove('d-none');
+            downloadBtn.classList.add('d-none');
+            resetBtn.classList.add('d-none');
+            filterSelect.disabled = true;
+            qrcodeContainer.style.display = 'none';
+            recordedVideoPreviewContainer.style.display = 'none';
+            video.style.display = 'block'; 
+
+            let seconds = 0;
+            recordingTimerDisplay.textContent = '00:00';
+            recordingTimerDisplay.style.display = 'block';
+            recordingInterval = setInterval(() => {
+                seconds++;
+                const mins = Math.floor(seconds / 60).toString().padStart(2, '0');
+                const secs = (seconds % 60).toString().padStart(2, '0');
+                recordingTimerDisplay.textContent = `${mins}:${secs}`;
+            }, 1000);
+
+            mediaRecorder.onstop = (event) => {
+                const superBuffer = new Blob(recordedBlobs, { type: options.mimeType || 'video/webm' });
+                recordedVideoURL = window.URL.createObjectURL(superBuffer);
+                
+                recordedVideoPreview.src = recordedVideoURL;
+                recordedVideoPreviewContainer.style.display = 'block';
+                video.style.display = 'none'; 
+                
+                downloadBtn.classList.remove('d-none');
+                resetBtn.classList.remove('d-none');
+
+                // Hentikan track dari canvasStream setelah selesai merekam
+                if (canvasStream) {
+                    canvasStream.getTracks().forEach(track => track.stop());
+                }
+            };
+
+            mediaRecorder.ondataavailable = (event) => {
+                if (event.data && event.data.size > 0) {
+                    recordedBlobs.push(event.data);
+                }
+            };
+
+            mediaRecorder.start(10); 
+        }
+
+        function stopRecording() {
+            if (mediaRecorder && mediaRecorder.state !== "inactive") {
+                mediaRecorder.stop(); // Ini akan memicu onstop
+            }
+            clearInterval(recordingInterval);
+            recordingTimerDisplay.style.display = 'none';
+            stopBtn.classList.add('d-none');
+            filterSelect.disabled = false;
+        }
+
+        function resetRecording() {
+            if (recordedVideoURL) {
+                window.URL.revokeObjectURL(recordedVideoURL);
+                recordedVideoURL = null;
+            }
+            if (animationFrameId) { // Pastikan loop gambar berhenti jika belum
+                cancelAnimationFrame(animationFrameId);
+            }
+
+            recordedBlobs = [];
+            video.srcObject = webcamStream; 
+            video.play(); // Pastikan video live stream dimainkan lagi
+            video.style.display = 'block';
+            recordedVideoPreviewContainer.style.display = 'none';
+            recordedVideoPreview.src = '';
+
+            // Mulai lagi loop menggambar ke canvas jika webcam aktif
+            if (webcamStream && webcamStream.active) {
+                 video.onloadedmetadata = () => { // Mungkin diperlukan jika resolusi berubah atau stream diinisialisasi ulang
+                    filterCanvas.width = video.videoWidth;
+                    filterCanvas.height = video.videoHeight;
+                    drawVideoToCanvas();
+                };
+                 if (video.readyState >= video.HAVE_METADATA) { // Jika metadata sudah ada
+                    filterCanvas.width = video.videoWidth;
+                    filterCanvas.height = video.videoHeight;
+                    drawVideoToCanvas();
+                 }
+            } else { // Jika stream tidak aktif, coba inisialisasi ulang
+                initWebcam(); 
+            }
+
+
+            recordBtn.classList.remove('d-none');
+            recordBtn.disabled = !(webcamStream && webcamStream.active); // disable jika stream belum siap
+            stopBtn.classList.add('d-none');
+            downloadBtn.classList.add('d-none');
+            resetBtn.classList.add('d-none');
+            qrcodeContainer.style.display = 'none';
+            recordingTimerDisplay.textContent = '00:00';
+            recordingTimerDisplay.style.display = 'none';
+            filterSelect.disabled = false;
+        }
+
+        function downloadAndQr() {
+            if (!recordedVideoURL || !recordedBlobs || recordedBlobs.length === 0) {
+                alert("Tidak ada video yang direkam untuk diunduh.");
+                return;
+            }
+
+            const blob = new Blob(recordedBlobs, { type: mediaRecorder.mimeType || 'video/webm' });
+            const filename = `filtered_video_${new Date().toISOString().slice(0,19).replace(/:/g,'-')}.webm`;
+
+            const link = document.createElement('a');
+            link.href = recordedVideoURL;
+            link.download = filename;
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+
+            uploadVideoForQr(blob, filename);
+        }
+        
+        async function uploadVideoForQr(videoBlob, filename) {
+            const formData = new FormData();
+            formData.append('videoFile', videoBlob, filename); 
+
+            try {
+                const response = await fetch('upload.php', {
+                    method: 'POST',
+                    body: formData 
+                });
+
+                if (!response.ok) {
+                    let errorText = response.statusText;
+                    try { const errorBody = await response.text(); errorText += ` - ${errorBody}`; } catch (e) { /* ignore */ }
+                    throw new Error('Network response was not ok: ' + errorText);
+                }
+                const result = await response.json();
+                if (result.success && result.videoUrl) {
+                    generateAndShowQrCode(result.videoUrl);
+                } else {
+                    console.error('Upload failed server-side:', result.message || 'Unknown error from server');
+                    alert('Gagal membuat QR Code (server): ' + (result.message || 'Pastikan upload.php dikonfigurasi.'));
+                }
+            } catch (error) {
+                console.error('Error uploading video:', error);
+                alert('Terjadi kesalahan teknis saat mengunggah video untuk QR Code. ' + error.message);
+            }
+        }
+
+        function generateAndShowQrCode(videoUrl) {
+            qrcodeCanvasDiv.innerHTML = ''; 
+            try {
+                new QRCode(qrcodeCanvasDiv, {
+                    text: videoUrl, width: 128, height: 128,
+                    colorDark: "#000000", colorLight: "#ffffff",
+                    correctLevel: QRCode.CorrectLevel.H
+                });
+                qrcodeContainer.style.display = 'block';
+            } catch(e) {
+                console.error("Error membuat QR Code:", e);
+                alert("Gagal menampilkan QR Code.");
+            }
+        }
+    </script>
+</body>
+</html>
